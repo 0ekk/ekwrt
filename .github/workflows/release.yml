@@ -66,6 +66,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "$WORK_DIR"
           scripts/checkout-upstream.sh > "$WORK_DIR/build.env"
           cat "$WORK_DIR/build.env" >> "$GITHUB_ENV"
 
