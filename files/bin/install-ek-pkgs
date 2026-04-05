@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="${EKWRT_ROOT:-/}"
+ETC_DIR="$ROOT_DIR/etc"
+STATE_FILE="$ETC_DIR/ekwrt-release"
+PACKAGE_LIST_FILE="$ETC_DIR/ondemand-packages.txt"
+OPENWRT_RELEASE_FILE="$ETC_DIR/openwrt_release"
+
+DRY_RUN=0
+
+usage() {
+  cat <<'EOF'
+Usage: install-ek-pkgs [--dry-run] [package...]
+EOF
+}
+
+load_kv_file() {
+  local file="$1"
+  while IFS='=' read -r key value; do
+    [ -n "${key:-}" ] || continue
+    case "$key" in
+      \#*) continue ;;
+    esac
+    value="${value#\'}"
+    value="${value%\'}"
+    export "$key=$value"
+  done < "$file"
+}
+
+load_package_defaults() {
+  mapfile -t REQUESTED_PACKAGES < <(grep -Ev '^\s*(#|$)' "$PACKAGE_LIST_FILE")
+}
+
+ensure_bootstrap_tools() {
+  local bootstrap_pkgs="ca-bundle ca-certificates wget-ssl zstd"
+  if command -v opkg >/dev/null 2>&1; then
+    opkg update
+    opkg install $bootstrap_pkgs
+    return
+  fi
+  if command -v apk >/dev/null 2>&1; then
+    apk update
+    apk add $bootstrap_pkgs
+    return
+  fi
+}
+
+detect_release_url() {
+  if [ -z "${GITHUB_REPOSITORY:-}" ] || [ -z "${RELEASE_TAG:-}" ]; then
+    echo "Missing GITHUB_REPOSITORY or RELEASE_TAG in $STATE_FILE" >&2
+    exit 1
+  fi
+  RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+}
+
+find_opkg_repos() {
+  find "$1" -type f \( -name 'Packages' -o -name 'Packages.gz' \) -printf '%h\n' | sort -u
+}
+
+fetch_assets() {
+  TMPDIR="$(mktemp -d)"
+  trap 'rm -rf "$TMPDIR"' EXIT
+
+  if command -v uclient-fetch >/dev/null 2>&1; then
+    uclient-fetch -O "$TMPDIR/packages.tar.zst" "$RELEASE_URL/packages.tar.zst"
+    uclient-fetch -O "$TMPDIR/kmods.tar.zst" "$RELEASE_URL/kmods.tar.zst"
+  else
+    wget -O "$TMPDIR/packages.tar.zst" "$RELEASE_URL/packages.tar.zst"
+    wget -O "$TMPDIR/kmods.tar.zst" "$RELEASE_URL/kmods.tar.zst"
+  fi
+
+  extract_tar_zst "$TMPDIR/packages.tar.zst" "$TMPDIR"
+  extract_tar_zst "$TMPDIR/kmods.tar.zst" "$TMPDIR"
+}
+
+extract_tar_zst() {
+  local archive="$1"
+  local destination="$2"
+  if tar --help 2>/dev/null | grep -q -- '--zstd'; then
+    tar --zstd -xf "$archive" -C "$destination"
+    return
+  fi
+  zstd -dc "$archive" | tar -xf - -C "$destination"
+}
+
+install_with_opkg() {
+  local feed_file="/etc/opkg/ek-localfeeds.conf"
+  local repo
+  local restore_needed=0
+  if [ -e "$feed_file" ]; then
+    mv "$feed_file" "$feed_file.bak"
+    restore_needed=1
+  fi
+  : > "$feed_file"
+  while IFS= read -r repo; do
+    printf 'src/gz %s file://%s\n' "ek_$(basename "$repo" | tr -cs 'a-zA-Z0-9' '_')" "$repo" >> "$feed_file"
+  done < <(find_opkg_repos "$TMPDIR")
+  opkg update
+  opkg install "${REQUESTED_PACKAGES[@]}"
+  rm -f "$feed_file"
+  if [ "$restore_needed" -eq 1 ]; then
+    mv "$feed_file.bak" "$feed_file"
+  fi
+}
+
+find_apk_repos() {
+  find "$TMPDIR" -type f \( -name 'packages.adb' -o -name 'APKINDEX.tar.gz' \) -printf '%h\n' | sort -u
+}
+
+install_with_apk() {
+  local apk_args=()
+  local repo
+  while IFS= read -r repo; do
+    apk_args+=(--repository "$repo")
+  done < <(find_apk_repos)
+  apk add --allow-untrusted "${apk_args[@]}" "${REQUESTED_PACKAGES[@]}"
+}
+
+main() {
+  local arg
+  local positional=()
+  for arg in "$@"; do
+    case "$arg" in
+      --self-test-find-opkg-repos)
+        find_opkg_repos "$2"
+        exit 0
+        ;;
+      --dry-run)
+        DRY_RUN=1
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        positional+=("$arg")
+        ;;
+    esac
+  done
+
+  [ -f "$STATE_FILE" ] || { echo "Missing $STATE_FILE" >&2; exit 1; }
+  [ -f "$PACKAGE_LIST_FILE" ] || { echo "Missing $PACKAGE_LIST_FILE" >&2; exit 1; }
+  load_kv_file "$STATE_FILE"
+  [ -f "$OPENWRT_RELEASE_FILE" ] && load_kv_file "$OPENWRT_RELEASE_FILE"
+  detect_release_url
+
+  if [ "${#positional[@]}" -gt 0 ]; then
+    REQUESTED_PACKAGES=("${positional[@]}")
+  else
+    load_package_defaults
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf 'release_url=%s\n' "$RELEASE_URL"
+    printf 'packages=%s\n' "${REQUESTED_PACKAGES[*]}"
+    exit 0
+  fi
+
+  ensure_bootstrap_tools
+  fetch_assets
+
+  if command -v opkg >/dev/null 2>&1; then
+    install_with_opkg
+    exit 0
+  fi
+  if command -v apk >/dev/null 2>&1; then
+    install_with_apk
+    exit 0
+  fi
+
+  echo "Neither opkg nor apk is available" >&2
+  exit 1
+}
+
+main "$@"
