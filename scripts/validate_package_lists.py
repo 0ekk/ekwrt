@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 
 
-PACKAGE_PATTERN = re.compile(r"^define\s+(?:Package|KernelPackage)/(\S+)")
+MAKEFILE_PACKAGE_PATTERN = re.compile(r"^define\s+(?:Package|KernelPackage)/(\S+)")
+INDEX_PACKAGE_PATTERN = re.compile(r"^Package:\s+(\S+)")
 
 
 def repo_root() -> Path:
@@ -27,17 +28,31 @@ def read_list_file(path: Path) -> list[str]:
     return items
 
 
-def discover_available_packages(buildroot_dir: Path) -> set[str]:
+def discover_local_packages(buildroot_dir: Path) -> set[str]:
     available: set[str] = set()
-    for base in (buildroot_dir / "package", buildroot_dir / "feeds"):
-        if not base.exists():
-            continue
-        for makefile in base.rglob("Makefile"):
-            text = makefile.read_text(encoding="utf-8", errors="ignore")
-            for raw_line in text.splitlines():
-                match = PACKAGE_PATTERN.match(raw_line.strip())
-                if match:
-                    available.add(match.group(1))
+    base = buildroot_dir / "package"
+    if not base.exists():
+        return available
+    for makefile in base.rglob("Makefile"):
+        text = makefile.read_text(encoding="utf-8", errors="ignore")
+        for raw_line in text.splitlines():
+            match = MAKEFILE_PACKAGE_PATTERN.match(raw_line.strip())
+            if match:
+                available.add(match.group(1))
+    return available
+
+
+def discover_feed_packages(buildroot_dir: Path) -> set[str]:
+    available: set[str] = set()
+    feeds_dir = buildroot_dir / "feeds"
+    if not feeds_dir.exists():
+        return available
+    for index_file in feeds_dir.glob("*.index"):
+        text = index_file.read_text(encoding="utf-8", errors="ignore")
+        for raw_line in text.splitlines():
+            match = INDEX_PACKAGE_PATTERN.match(raw_line.strip())
+            if match:
+                available.add(match.group(1))
     return available
 
 
@@ -46,7 +61,8 @@ def main() -> int:
     buildroot_dir = Path(os.environ["BUILDROOT_DIR"])
     requested = read_list_file(root / "config" / "builtin-packages.txt")
     requested.extend(read_list_file(root / "config" / "ondemand-packages.txt"))
-    available = discover_available_packages(buildroot_dir)
+    available = discover_feed_packages(buildroot_dir)
+    available.update(discover_local_packages(buildroot_dir))
     missing = [pkg for pkg in requested if pkg not in available]
     if missing:
         sys.stderr.write("Missing packages for selected upstream:\n")

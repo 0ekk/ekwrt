@@ -47,11 +47,11 @@ class ValidatePackageListsTests(unittest.TestCase):
             workspace = Path(tmp)
             (workspace / "config").mkdir()
             buildroot = workspace / "openwrt"
-            feed_pkg = buildroot / "feeds" / "luci" / "applications" / "demo"
-            feed_pkg.mkdir(parents=True)
-            (feed_pkg / "Makefile").write_text(
-                "define Package/luci-app-ddns\nendef\n"
-                "define Package/luci-ssl\nendef\n",
+            feed_index_dir = buildroot / "feeds"
+            feed_index_dir.mkdir(parents=True)
+            (feed_index_dir / "luci.index").write_text(
+                "Package: luci-app-ddns\nVersion: 1\n\n"
+                "Package: luci-ssl\nVersion: 1\n\n",
                 encoding="utf-8",
             )
             local_pkg = buildroot / "package" / "turboacc"
