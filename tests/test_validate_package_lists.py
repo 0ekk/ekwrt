@@ -17,13 +17,14 @@ class ValidatePackageListsTests(unittest.TestCase):
             (workspace / "config").mkdir()
             buildroot = workspace / "openwrt"
             buildroot.mkdir()
-            feeds = buildroot / "scripts" / "feeds"
-            feeds.parent.mkdir(parents=True)
-            feeds.write_text(
-                "#!/usr/bin/env bash\nprintf '%s\\n' luci tmux luci-app-turboacc\n",
+            package_dir = buildroot / "package" / "demo"
+            package_dir.mkdir(parents=True)
+            (package_dir / "Makefile").write_text(
+                "define Package/luci\nendef\n"
+                "define Package/tmux\nendef\n"
+                "define Package/luci-app-turboacc\nendef\n",
                 encoding="utf-8",
             )
-            feeds.chmod(0o755)
             (workspace / "config" / "builtin-packages.txt").write_text("luci\n", encoding="utf-8")
             (workspace / "config" / "ondemand-packages.txt").write_text("vim-full\n", encoding="utf-8")
 
@@ -40,6 +41,47 @@ class ValidatePackageListsTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("vim-full", result.stderr)
+
+    def test_accepts_packages_found_in_makefiles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "config").mkdir()
+            buildroot = workspace / "openwrt"
+            feed_pkg = buildroot / "feeds" / "luci" / "applications" / "demo"
+            feed_pkg.mkdir(parents=True)
+            (feed_pkg / "Makefile").write_text(
+                "define Package/luci-app-ddns\nendef\n"
+                "define Package/luci-ssl\nendef\n",
+                encoding="utf-8",
+            )
+            local_pkg = buildroot / "package" / "turboacc"
+            local_pkg.mkdir(parents=True)
+            (local_pkg / "Makefile").write_text(
+                "define Package/luci-app-turboacc\nendef\n"
+                "define Package/tmux\nendef\n",
+                encoding="utf-8",
+            )
+            (workspace / "config" / "builtin-packages.txt").write_text(
+                "luci-ssl\nluci-app-turboacc\n",
+                encoding="utf-8",
+            )
+            (workspace / "config" / "ondemand-packages.txt").write_text(
+                "luci-app-ddns\ntmux\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["REPO_ROOT"] = str(workspace)
+            env["BUILDROOT_DIR"] = str(buildroot)
+            result = subprocess.run(
+                [str(SCRIPT)],
+                check=False,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
