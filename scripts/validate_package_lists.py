@@ -7,6 +7,7 @@ from pathlib import Path
 
 MAKEFILE_PACKAGE_PATTERN = re.compile(r"^define\s+(?:Package|KernelPackage)/(\S+)")
 INDEX_PACKAGE_PATTERN = re.compile(r"^Package:\s+(\S+)")
+SIMPLE_ASSIGNMENT_PATTERN = re.compile(r"^([A-Za-z0-9_]+)\s*:?=\s*(.+)$")
 
 
 def repo_root() -> Path:
@@ -35,10 +36,18 @@ def discover_local_packages(buildroot_dir: Path) -> set[str]:
         return available
     for makefile in base.rglob("Makefile"):
         text = makefile.read_text(encoding="utf-8", errors="ignore")
+        variables: dict[str, str] = {}
         for raw_line in text.splitlines():
-            match = MAKEFILE_PACKAGE_PATTERN.match(raw_line.strip())
+            line = raw_line.strip()
+            assign_match = SIMPLE_ASSIGNMENT_PATTERN.match(line)
+            if assign_match:
+                variables[assign_match.group(1)] = assign_match.group(2).strip()
+            match = MAKEFILE_PACKAGE_PATTERN.match(line)
             if match:
-                available.add(match.group(1))
+                name = match.group(1)
+                for key, value in variables.items():
+                    name = name.replace(f"$({key})", value)
+                available.add(name)
     return available
 
 

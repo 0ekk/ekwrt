@@ -83,6 +83,41 @@ class ValidatePackageListsTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_accepts_nested_local_integration_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "config").mkdir()
+            buildroot = workspace / "openwrt"
+            (buildroot / "feeds").mkdir(parents=True)
+            nested = buildroot / "package" / "turboacc" / "luci-app-turboacc"
+            nested.mkdir(parents=True)
+            (nested / "Makefile").write_text(
+                "PKG_NAME:=luci-app-turboacc\n"
+                "define Package/$(PKG_NAME)\nendef\n",
+                encoding="utf-8",
+            )
+            (workspace / "config" / "builtin-packages.txt").write_text(
+                "luci-app-turboacc\n",
+                encoding="utf-8",
+            )
+            (workspace / "config" / "ondemand-packages.txt").write_text(
+                "",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["REPO_ROOT"] = str(workspace)
+            env["BUILDROOT_DIR"] = str(buildroot)
+            result = subprocess.run(
+                [str(SCRIPT)],
+                check=False,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
