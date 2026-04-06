@@ -134,7 +134,8 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          OVERLAY_DIR="$WORK_DIR/rootfs-overlay" scripts/render-runtime-overlay.sh
+          rm -rf "$BUILDROOT_DIR/files"
+          OVERLAY_DIR="$BUILDROOT_DIR/files" scripts/render-runtime-overlay.sh
 
       - name: Cache downloads
         uses: actions/cache@v4
@@ -157,15 +158,15 @@ jobs:
           diagnose_failure() {
             set +e
             echo "Build failed. Re-running install phases with verbose logging."
-            make -j1 package/install V=sc FILES="$WORK_DIR/rootfs-overlay"
-            make -j1 target/install V=sc FILES="$WORK_DIR/rootfs-overlay"
+            make -j1 package/install V=sc
+            make -j1 target/install V=sc
           }
           trap report_disk EXIT
           make defconfig
           report_disk
           make download -j"$build_jobs"
           report_disk
-          make -j"$build_jobs" FILES="$WORK_DIR/rootfs-overlay" || {
+          make -j"$build_jobs" || {
             diagnose_failure
             exit 1
           }
