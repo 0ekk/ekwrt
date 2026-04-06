@@ -37,17 +37,22 @@ def discover_local_packages(buildroot_dir: Path) -> set[str]:
     for makefile in base.rglob("Makefile"):
         text = makefile.read_text(encoding="utf-8", errors="ignore")
         variables: dict[str, str] = {}
+        uses_luci_mk = False
         for raw_line in text.splitlines():
             line = raw_line.strip()
             assign_match = SIMPLE_ASSIGNMENT_PATTERN.match(line)
             if assign_match:
                 variables[assign_match.group(1)] = assign_match.group(2).strip()
+            if "feeds/luci/luci.mk" in line:
+                uses_luci_mk = True
             match = MAKEFILE_PACKAGE_PATTERN.match(line)
             if match:
                 name = match.group(1)
                 for key, value in variables.items():
                     name = name.replace(f"$({key})", value)
                 available.add(name)
+        if uses_luci_mk and "PKG_NAME" in variables:
+            available.add(variables["PKG_NAME"])
     return available
 
 
