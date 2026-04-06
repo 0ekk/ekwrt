@@ -44,7 +44,13 @@ jobs:
 
       - name: Free disk space
         run: |
+          sudo docker system prune -af || true
+          sudo rm -rf /opt/az || true
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          sudo rm -rf /usr/share/swift /usr/local/.ghcup /usr/local/julia* || true
+          sudo rm -rf /opt/hostedtoolcache /usr/local/lib/node_modules || true
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* || true
           df -h
 
       - name: Resolve release token
@@ -143,9 +149,17 @@ jobs:
         run: |
           set -euo pipefail
           cd "$BUILDROOT_DIR"
+          build_jobs=2
+          report_disk() {
+            df -h
+            du -sh build_dir staging_dir bin dl 2>/dev/null || true
+          }
+          trap report_disk EXIT
           make defconfig
-          make download -j"$(nproc)"
-          make -j"$(nproc)" FILES="$WORK_DIR/rootfs-overlay"
+          report_disk
+          make download -j"$build_jobs"
+          report_disk
+          make -j"$build_jobs" FILES="$WORK_DIR/rootfs-overlay"
 
       - name: Package release assets
         shell: bash
