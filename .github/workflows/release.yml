@@ -184,6 +184,14 @@ jobs:
         with:
           tag_name: ${{ steps.release-token.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
-          body_path: dist/release-notes.md
+          body: |
+            Release artifacts:
+            - apks.tar.zst
+            - config.buildinfo
+            - feeds.buildinfo
+            - version.buildinfo
           files: |
-            dist/*
+            dist/apks.tar.zst
+            dist/config.buildinfo
+            dist/feeds.buildinfo
+            dist/version.buildinfo

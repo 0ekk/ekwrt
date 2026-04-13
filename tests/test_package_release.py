@@ -1,4 +1,3 @@
-import json
 import os
 import subprocess
 import tempfile
@@ -21,20 +20,11 @@ class PackageReleaseTests(unittest.TestCase):
             kmods_dir.mkdir()
 
             keep = {
-                "openwrt-25.12.2-ek-v1-x86-64-generic-ext4-combined-efi.img.gz": "img",
-                "openwrt-25.12.2-ek-v1-x86-64-generic-kernel.bin": "kernel",
-                "openwrt-25.12.2-ek-v1-x86-64-rootfs.tar.gz": "rootfs",
-                "openwrt-25.12.2-ek-v1-x86-64.manifest": "manifest",
                 "config.buildinfo": "config",
                 "feeds.buildinfo": "feeds",
                 "version.buildinfo": "version",
-                "profiles.json": "{}",
             }
-            drop = {
-                "openwrt-25.12.2-ek-v1-x86-64-generic-squashfs-combined-efi.img.gz": "drop",
-            }
-
-            for name, value in {**keep, **drop}.items():
+            for name, value in keep.items():
                 (target_dir / name).write_text(value, encoding="utf-8")
 
             (package_dir / "demo.ipk").write_text("pkg", encoding="utf-8")
@@ -53,22 +43,13 @@ class PackageReleaseTests(unittest.TestCase):
             )
 
             dist = workspace / "dist"
-            self.assertTrue((dist / "packages.tar.zst").exists())
-            self.assertTrue((dist / "kmods.tar.zst").exists())
-            self.assertTrue((dist / "index.html").exists())
-            self.assertFalse(
-                (dist / "openwrt-25.12.2-ek-v1-x86-64-generic-squashfs-combined-efi.img.gz").exists()
-            )
-
-            metadata = json.loads((dist / "release-metadata.json").read_text(encoding="utf-8"))
-            image_names = {item["name"] for item in metadata["image_files"]}
+            self.assertTrue((dist / "apks.tar.zst").exists())
+            self.assertTrue((dist / "config.buildinfo").exists())
+            self.assertTrue((dist / "feeds.buildinfo").exists())
+            self.assertTrue((dist / "version.buildinfo").exists())
             self.assertEqual(
-                image_names,
-                {
-                    "openwrt-25.12.2-ek-v1-x86-64-generic-ext4-combined-efi.img.gz",
-                    "openwrt-25.12.2-ek-v1-x86-64-generic-kernel.bin",
-                    "openwrt-25.12.2-ek-v1-x86-64-rootfs.tar.gz",
-                },
+                {path.name for path in dist.iterdir() if path.is_file()},
+                {"apks.tar.zst", "config.buildinfo", "feeds.buildinfo", "version.buildinfo"},
             )
 
 

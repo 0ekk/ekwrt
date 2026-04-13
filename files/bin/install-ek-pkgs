@@ -63,15 +63,12 @@ fetch_assets() {
   trap 'rm -rf "$TMPDIR"' EXIT
 
   if command -v uclient-fetch >/dev/null 2>&1; then
-    uclient-fetch -O "$TMPDIR/packages.tar.zst" "$RELEASE_URL/packages.tar.zst"
-    uclient-fetch -O "$TMPDIR/kmods.tar.zst" "$RELEASE_URL/kmods.tar.zst"
+    uclient-fetch -O "$TMPDIR/apks.tar.zst" "$RELEASE_URL/apks.tar.zst"
   else
-    wget -O "$TMPDIR/packages.tar.zst" "$RELEASE_URL/packages.tar.zst"
-    wget -O "$TMPDIR/kmods.tar.zst" "$RELEASE_URL/kmods.tar.zst"
+    wget -O "$TMPDIR/apks.tar.zst" "$RELEASE_URL/apks.tar.zst"
   fi
 
-  extract_tar_zst "$TMPDIR/packages.tar.zst" "$TMPDIR"
-  extract_tar_zst "$TMPDIR/kmods.tar.zst" "$TMPDIR"
+  extract_tar_zst "$TMPDIR/apks.tar.zst" "$TMPDIR"
 }
 
 extract_tar_zst() {
@@ -110,11 +107,20 @@ find_apk_repos() {
 
 install_with_apk() {
   local apk_args=()
+  local keyring_pkg=""
   local repo
   while IFS= read -r repo; do
     apk_args+=(--repository "$repo")
+    if [ -z "$keyring_pkg" ]; then
+      keyring_pkg="$(find "$repo" -maxdepth 1 -type f -name 'ekwrt-keyring-*.apk' | head -n1 || true)"
+    fi
   done < <(find_apk_repos)
-  apk add --allow-untrusted "${apk_args[@]}" "${REQUESTED_PACKAGES[@]}"
+  if [ -z "$keyring_pkg" ]; then
+    echo "Missing ekwrt-keyring package in local repositories" >&2
+    exit 1
+  fi
+  apk add --allow-untrusted "$keyring_pkg"
+  apk add "${apk_args[@]}" "${REQUESTED_PACKAGES[@]}"
 }
 
 main() {

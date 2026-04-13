@@ -10,11 +10,10 @@ Meta-repository for building and publishing a custom `OpenWrt x86_64` firmware.
 - Integrate `chenmozhijin/turboacc` through a dedicated workflow, with `sfe` enabled by default
 - Use a firmware version format of `<upstream-version>-ek-<release-token>`
 - Publish only these release assets:
-  - `generic-ext4-combined-efi.img.gz`
-  - `generic-kernel.bin`
-  - `rootfs.tar.gz`
-  - `packages.tar.zst`
-  - `kmods.tar.zst`
+  - `apks.tar.zst`
+  - `config.buildinfo`
+  - `feeds.buildinfo`
+  - `version.buildinfo`
 
 ## Layout
 
