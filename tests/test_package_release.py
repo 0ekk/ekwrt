@@ -27,6 +27,7 @@ class PackageReleaseTests(unittest.TestCase):
             for name, value in keep.items():
                 (target_dir / name).write_text(value, encoding="utf-8")
 
+            (package_dir / "packages.adb").write_text("index", encoding="utf-8")
             (package_dir / "demo.apk").write_text("pkg", encoding="utf-8")
             (kmods_dir / "kmod-demo.apk").write_text("kmod", encoding="utf-8")
 
@@ -52,7 +53,16 @@ class PackageReleaseTests(unittest.TestCase):
                 {"apks.tar.zst", "config.buildinfo", "feeds.buildinfo", "version.buildinfo"},
             )
 
-    def test_splits_kmods_from_packages_when_kmods_directory_missing(self):
+            listing = subprocess.run(
+                ["tar", "--zstd", "-tf", str(dist / "apks.tar.zst")],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout
+            self.assertIn("packages/demo.apk", listing)
+            self.assertIn("kmods/kmod-demo.apk", listing)
+
+    def test_succeeds_without_kmods_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             target_dir = workspace / "bin" / "targets" / "x86" / "64"
@@ -61,8 +71,8 @@ class PackageReleaseTests(unittest.TestCase):
 
             for name in ("config.buildinfo", "feeds.buildinfo", "version.buildinfo"):
                 (target_dir / name).write_text(name, encoding="utf-8")
+            (package_dir / "packages.adb").write_text("index", encoding="utf-8")
             (package_dir / "demo.apk").write_text("pkg", encoding="utf-8")
-            (package_dir / "kmod-foo.apk").write_text("kmod", encoding="utf-8")
 
             env = os.environ.copy()
             env["TARGET_DIR"] = str(target_dir)
@@ -82,7 +92,7 @@ class PackageReleaseTests(unittest.TestCase):
                 capture_output=True,
             ).stdout
             self.assertIn("packages/demo.apk", listing)
-            self.assertIn("kmods/kmod-foo.apk", listing)
+            self.assertNotIn("kmods/", listing)
 
     def test_falls_back_to_bin_buildinfo_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -91,8 +101,8 @@ class PackageReleaseTests(unittest.TestCase):
             target_dir = bin_dir / "targets" / "x86" / "64"
             package_dir = target_dir / "packages"
             package_dir.mkdir(parents=True)
+            (package_dir / "packages.adb").write_text("index", encoding="utf-8")
             (package_dir / "demo.apk").write_text("pkg", encoding="utf-8")
-            (package_dir / "kmod-foo.apk").write_text("kmod", encoding="utf-8")
 
             (bin_dir / "config.buildinfo").write_text("config", encoding="utf-8")
             (bin_dir / "feeds.buildinfo").write_text("feeds", encoding="utf-8")
@@ -113,6 +123,38 @@ class PackageReleaseTests(unittest.TestCase):
             self.assertTrue((dist / "config.buildinfo").exists())
             self.assertTrue((dist / "feeds.buildinfo").exists())
             self.assertTrue((dist / "version.buildinfo").exists())
+
+    def test_fails_when_turboacc_package_artifact_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            target_dir = workspace / "bin" / "targets" / "x86" / "64"
+            package_dir = target_dir / "packages"
+            package_dir.mkdir(parents=True)
+
+            for name in ("config.buildinfo", "feeds.buildinfo", "version.buildinfo"):
+                (target_dir / name).write_text(name, encoding="utf-8")
+            (package_dir / "packages.adb").write_text("index", encoding="utf-8")
+
+            turboacc_dir = workspace / "package" / "turboacc"
+            turboacc_dir.mkdir(parents=True)
+            (turboacc_dir / "Makefile").write_text(
+                "define Package/luci-app-turboacc\nendef\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["TARGET_DIR"] = str(target_dir)
+            env["DIST_DIR"] = str(workspace / "dist")
+            result = subprocess.run(
+                [str(SCRIPT)],
+                check=False,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Missing turboacc package artifacts", result.stderr)
 
 
 if __name__ == "__main__":

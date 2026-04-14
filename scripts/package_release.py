@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 import os
 import shutil
 import subprocess
@@ -8,6 +9,7 @@ from pathlib import Path
 
 
 KEEP_FILES = ("config.buildinfo", "feeds.buildinfo", "version.buildinfo")
+PACKAGE_DEFINE_PATTERN = re.compile(r"^\s*define\s+Package/([A-Za-z0-9_.+-]+)\s*$")
 
 
 def copy_buildinfo(target_dir: Path, dist_dir: Path) -> None:
@@ -20,51 +22,79 @@ def copy_buildinfo(target_dir: Path, dist_dir: Path) -> None:
         shutil.copy2(source, dist_dir / name)
 
 
-def collect_packages_dir(target_dir: Path, work_dir: Path) -> Path:
-    direct = target_dir / "packages"
-    if direct.is_dir():
-        return direct
+def extract_turboacc_package_names(buildroot_dir: Path) -> set[str]:
+    turboacc_dir = buildroot_dir / "package" / "turboacc"
+    if not turboacc_dir.is_dir():
+        return set()
 
-    root = work_dir / "packages"
-    root.mkdir(parents=True, exist_ok=True)
-    candidates = sorted(path for path in target_dir.rglob("*.apk") if path.is_file())
-    if not candidates:
-        raise FileNotFoundError(f"Missing package artifacts under {target_dir}")
-    for pkg in candidates:
-        shutil.copy2(pkg, root / pkg.name)
-    for index_name in ("packages.adb", "APKINDEX.tar.gz"):
-        for index in target_dir.rglob(index_name):
-            if index.is_file():
-                shutil.copy2(index, root / index.name)
-                break
-    return root
+    names: set[str] = set()
+    for makefile in turboacc_dir.rglob("Makefile"):
+        for line in makefile.read_text(encoding="utf-8", errors="ignore").splitlines():
+            match = PACKAGE_DEFINE_PATTERN.match(line)
+            if match:
+                names.add(match.group(1))
+    return names
 
 
-def split_kmods(packages_dir: Path, work_dir: Path) -> Path:
-    out_dir = work_dir / "kmods"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for pkg in packages_dir.rglob("kmod-*.apk"):
-        if pkg.is_file():
-            shutil.copy2(pkg, out_dir / pkg.name)
-    return out_dir
+def ensure_turboacc_packages_present(target_dir: Path, buildroot_dir: Path) -> None:
+    package_names = extract_turboacc_package_names(buildroot_dir)
+    missing = [name for name in sorted(package_names) if not list(target_dir.rglob(f"{name}-*.apk"))]
+    if missing:
+        raise FileNotFoundError(
+            "Missing turboacc package artifacts: "
+            + ", ".join(missing)
+            + f" under {target_dir}"
+        )
+
+
+def pick_apk_tool(buildroot_dir: Path) -> str | None:
+    buildroot_apk = buildroot_dir / "staging_dir" / "host" / "bin" / "apk"
+    if buildroot_apk.is_file():
+        return str(buildroot_apk)
+    return None
+
+
+def ensure_packages_index_valid(packages_dir: Path, buildroot_dir: Path) -> None:
+    index = packages_dir / "packages.adb"
+    if not index.is_file():
+        raise FileNotFoundError(f"Missing required index: {index}")
+    if index.stat().st_size == 0:
+        raise ValueError(f"Empty packages index: {index}")
+
+    apk_tool = pick_apk_tool(buildroot_dir)
+    if apk_tool is None:
+        return
+    subprocess.run(
+        [apk_tool, "adbdump", "--format", "json", str(index)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
 def create_apks_archive(target_dir: Path, dist_dir: Path) -> None:
+    buildroot_dir = target_dir.parents[3]
+    packages_dir = target_dir / "packages"
+    if not packages_dir.is_dir():
+        raise FileNotFoundError(f"Missing required packages directory: {packages_dir}")
+
+    ensure_turboacc_packages_present(target_dir, buildroot_dir)
+    ensure_packages_index_valid(packages_dir, buildroot_dir)
+
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
-        packages_dir = collect_packages_dir(target_dir, work_dir)
-        kmods_dir = target_dir / "kmods"
-        if kmods_dir.is_dir():
-            effective_kmods = kmods_dir
-        else:
-            effective_kmods = split_kmods(packages_dir, work_dir)
 
         stage_dir = work_dir / "stage"
         shutil.copytree(packages_dir, stage_dir / "packages")
-        shutil.copytree(effective_kmods, stage_dir / "kmods")
+        entries = ["packages"]
+        kmods_dir = target_dir / "kmods"
+        if kmods_dir.is_dir():
+            shutil.copytree(kmods_dir, stage_dir / "kmods")
+            entries.append("kmods")
 
         subprocess.run(
-            ["tar", "-C", str(stage_dir), "--zstd", "-cf", str(dist_dir / "apks.tar.zst"), "packages", "kmods"],
+            ["tar", "-C", str(stage_dir), "--zstd", "-cf", str(dist_dir / "apks.tar.zst"), *entries],
             check=True,
         )
 
