@@ -166,7 +166,17 @@ jobs:
           report_disk
           make download -j"$build_jobs"
           report_disk
-          make -j"$build_jobs" || {
+          make -j"$build_jobs" prepare || {
+            diagnose_failure
+            exit 1
+          }
+          report_disk
+          make -j"$build_jobs" package/compile || {
+            diagnose_failure
+            exit 1
+          }
+          report_disk
+          make -j1 package/index || {
             diagnose_failure
             exit 1
           }

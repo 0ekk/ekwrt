@@ -32,8 +32,10 @@ mkdir -p "$(dirname "$OUTPUT_CONFIG")"
   printf 'CONFIG_TARGET_ROOTFS_TARGZ=y\n'
   printf 'CONFIG_VERSION_DIST="OpenWrt"\n'
   printf 'CONFIG_VERSION_NUMBER="%s"\n' "$EK_VERSION"
-  printf 'CONFIG_BUILDBOT=y\n'
-  printf 'CONFIG_PER_FEED_REPO=y\n'
+  printf '# CONFIG_BUILDBOT is not set\n'
+  printf '# CONFIG_ALL_NONSHARED is not set\n'
+  printf '# CONFIG_ALL_KMODS is not set\n'
+  printf '# CONFIG_PER_FEED_REPO is not set\n'
   printf 'CONFIG_SIGNED_PACKAGES=y\n'
   printf 'CONFIG_SIGN_EACH_PACKAGE=y\n'
   printf 'CONFIG_PACKAGE_luci-app-turboacc=y\n'
