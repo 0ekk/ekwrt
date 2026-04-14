@@ -52,7 +52,7 @@ class PackageReleaseTests(unittest.TestCase):
                 {"apks.tar.zst", "config.buildinfo", "feeds.buildinfo", "version.buildinfo"},
             )
 
-    def test_creates_empty_kmods_when_missing(self):
+    def test_fails_when_kmods_directory_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             target_dir = workspace / "bin" / "targets" / "x86" / "64"
@@ -66,24 +66,16 @@ class PackageReleaseTests(unittest.TestCase):
             env = os.environ.copy()
             env["TARGET_DIR"] = str(target_dir)
             env["DIST_DIR"] = str(workspace / "dist")
-            subprocess.run(
+            result = subprocess.run(
                 [str(SCRIPT)],
-                check=True,
+                check=False,
                 text=True,
                 capture_output=True,
                 env=env,
             )
 
-            dist = workspace / "dist"
-            self.assertTrue((dist / "apks.tar.zst").exists())
-            listing = subprocess.run(
-                ["tar", "--zstd", "-tf", str(dist / "apks.tar.zst")],
-                check=True,
-                text=True,
-                capture_output=True,
-            ).stdout
-            self.assertIn("packages/", listing)
-            self.assertIn("kmods/", listing)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Missing required directories", result.stderr)
 
 
 if __name__ == "__main__":

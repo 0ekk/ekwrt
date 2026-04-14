@@ -3,7 +3,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 
@@ -20,27 +19,14 @@ def copy_buildinfo(target_dir: Path, dist_dir: Path) -> None:
 
 
 def create_apks_archive(target_dir: Path, dist_dir: Path) -> None:
-    packages_dir = target_dir / "packages"
-    if not packages_dir.is_dir():
-        raise FileNotFoundError(f"Missing required directory: {packages_dir}")
+    missing = [name for name in APK_DIRS if not (target_dir / name).is_dir()]
+    if missing:
+        raise FileNotFoundError(f"Missing required directories under {target_dir}: {', '.join(missing)}")
 
-    kmods_dir = target_dir / "kmods"
-    if kmods_dir.is_dir():
-        subprocess.run(
-            ["tar", "-C", str(target_dir), "--zstd", "-cf", str(dist_dir / "apks.tar.zst"), *APK_DIRS],
-            check=True,
-        )
-        return
-
-    # Keep official layout compatibility even when non-BUILDBOT builds do not emit kmods/.
-    with tempfile.TemporaryDirectory() as tmp:
-        staging_dir = Path(tmp)
-        shutil.copytree(packages_dir, staging_dir / "packages")
-        (staging_dir / "kmods").mkdir()
-        subprocess.run(
-            ["tar", "-C", str(staging_dir), "--zstd", "-cf", str(dist_dir / "apks.tar.zst"), *APK_DIRS],
-            check=True,
-        )
+    subprocess.run(
+        ["tar", "-C", str(target_dir), "--zstd", "-cf", str(dist_dir / "apks.tar.zst"), *APK_DIRS],
+        check=True,
+    )
 
 
 def main() -> int:
