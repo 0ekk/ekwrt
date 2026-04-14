@@ -52,6 +52,39 @@ class PackageReleaseTests(unittest.TestCase):
                 {"apks.tar.zst", "config.buildinfo", "feeds.buildinfo", "version.buildinfo"},
             )
 
+    def test_creates_empty_kmods_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            target_dir = workspace / "bin" / "targets" / "x86" / "64"
+            package_dir = target_dir / "packages"
+            package_dir.mkdir(parents=True)
+
+            for name in ("config.buildinfo", "feeds.buildinfo", "version.buildinfo"):
+                (target_dir / name).write_text(name, encoding="utf-8")
+            (package_dir / "demo.apk").write_text("pkg", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["TARGET_DIR"] = str(target_dir)
+            env["DIST_DIR"] = str(workspace / "dist")
+            subprocess.run(
+                [str(SCRIPT)],
+                check=True,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+
+            dist = workspace / "dist"
+            self.assertTrue((dist / "apks.tar.zst").exists())
+            listing = subprocess.run(
+                ["tar", "--zstd", "-tf", str(dist / "apks.tar.zst")],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout
+            self.assertIn("packages/", listing)
+            self.assertIn("kmods/", listing)
+
 
 if __name__ == "__main__":
     unittest.main()
