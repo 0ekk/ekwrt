@@ -10,6 +10,7 @@ from pathlib import Path
 
 KEEP_FILES = ("config.buildinfo", "feeds.buildinfo", "version.buildinfo")
 PACKAGE_DEFINE_PATTERN = re.compile(r"^\s*define\s+Package/([A-Za-z0-9_.+-]+)\s*$")
+PACKAGE_CONFIG_PATTERN = re.compile(r"^\s*CONFIG_PACKAGE_([A-Za-z0-9_.+-]+)=(?:y|m)\s*$")
 
 
 def copy_buildinfo(target_dir: Path, dist_dir: Path) -> None:
@@ -36,9 +37,24 @@ def extract_turboacc_package_names(buildroot_dir: Path) -> set[str]:
     return names
 
 
+def read_selected_packages(buildroot_dir: Path) -> set[str]:
+    config_path = buildroot_dir / ".config"
+    if not config_path.is_file():
+        return set()
+
+    selected: set[str] = set()
+    for line in config_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        match = PACKAGE_CONFIG_PATTERN.match(line)
+        if match:
+            selected.add(match.group(1))
+    return selected
+
+
 def ensure_turboacc_packages_present(target_dir: Path, buildroot_dir: Path) -> None:
-    package_names = extract_turboacc_package_names(buildroot_dir)
-    missing = [name for name in sorted(package_names) if not list(target_dir.rglob(f"{name}-*.apk"))]
+    defined = extract_turboacc_package_names(buildroot_dir)
+    selected = read_selected_packages(buildroot_dir)
+    required = sorted(name for name in defined if name in selected)
+    missing = [name for name in required if not list(target_dir.rglob(f"{name}-*.apk"))]
     if missing:
         raise FileNotFoundError(
             "Missing turboacc package artifacts: "

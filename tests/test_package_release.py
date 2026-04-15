@@ -141,6 +141,7 @@ class PackageReleaseTests(unittest.TestCase):
                 "define Package/luci-app-turboacc\nendef\n",
                 encoding="utf-8",
             )
+            (workspace / ".config").write_text("CONFIG_PACKAGE_luci-app-turboacc=y\n", encoding="utf-8")
 
             env = os.environ.copy()
             env["TARGET_DIR"] = str(target_dir)
@@ -155,6 +156,37 @@ class PackageReleaseTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Missing turboacc package artifacts", result.stderr)
+
+    def test_ignores_unselected_turboacc_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            target_dir = workspace / "bin" / "targets" / "x86" / "64"
+            package_dir = target_dir / "packages"
+            package_dir.mkdir(parents=True)
+
+            for name in ("config.buildinfo", "feeds.buildinfo", "version.buildinfo"):
+                (target_dir / name).write_text(name, encoding="utf-8")
+            (package_dir / "packages.adb").write_text("index", encoding="utf-8")
+            (package_dir / "demo.apk").write_text("pkg", encoding="utf-8")
+
+            turboacc_dir = workspace / "package" / "turboacc"
+            turboacc_dir.mkdir(parents=True)
+            (turboacc_dir / "Makefile").write_text(
+                "define Package/fast-classifier-example\nendef\n",
+                encoding="utf-8",
+            )
+            (workspace / ".config").write_text("# CONFIG_PACKAGE_fast-classifier-example is not set\n", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["TARGET_DIR"] = str(target_dir)
+            env["DIST_DIR"] = str(workspace / "dist")
+            subprocess.run(
+                [str(SCRIPT)],
+                check=True,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
 
 
 if __name__ == "__main__":
