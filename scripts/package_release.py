@@ -11,6 +11,11 @@ from pathlib import Path
 KEEP_FILES = ("config.buildinfo", "feeds.buildinfo", "version.buildinfo")
 PACKAGE_DEFINE_PATTERN = re.compile(r"^\s*define\s+Package/([A-Za-z0-9_.+-]+)\s*$")
 PACKAGE_CONFIG_PATTERN = re.compile(r"^\s*CONFIG_PACKAGE_([A-Za-z0-9_.+-]+)=(?:y|m)\s*$")
+TURBOACC_REQUIRED_DEP_PATTERNS = (
+    "firewall4-*.apk",
+    "libnftnl*-*.apk",
+    "nftables-json-*.apk",
+)
 
 
 def copy_buildinfo(target_dir: Path, dist_dir: Path) -> None:
@@ -53,13 +58,20 @@ def read_selected_packages(buildroot_dir: Path) -> set[str]:
 def ensure_turboacc_packages_present(target_dir: Path, buildroot_dir: Path) -> None:
     defined = extract_turboacc_package_names(buildroot_dir)
     selected = read_selected_packages(buildroot_dir)
-    required = sorted(name for name in defined if name in selected)
+    turboacc_selected = sorted(name for name in defined if name in selected)
+    if not turboacc_selected:
+        return
+
     search_roots = [target_dir, buildroot_dir / "bin" / "packages"]
     missing = []
-    for name in required:
+    for name in turboacc_selected:
         found = any(root.is_dir() and any(root.rglob(f"{name}-*.apk")) for root in search_roots)
         if not found:
             missing.append(name)
+    for pattern in TURBOACC_REQUIRED_DEP_PATTERNS:
+        found = any(root.is_dir() and any(root.rglob(pattern)) for root in search_roots)
+        if not found:
+            missing.append(pattern.replace("-*.apk", ""))
     if missing:
         raise FileNotFoundError(
             "Missing turboacc package artifacts: "
@@ -114,6 +126,43 @@ def collect_packages_tree(target_dir: Path, buildroot_dir: Path, destination: Pa
         )
 
 
+def refresh_packages_indexes(packages_dir: Path, buildroot_dir: Path) -> None:
+    apk_tool = pick_apk_tool(buildroot_dir)
+    if apk_tool is None:
+        return
+
+    repo_dirs = sorted(
+        {
+            path.parent
+            for path in packages_dir.rglob("*.apk")
+            if path.is_file()
+        }
+    )
+    if not repo_dirs:
+        raise FileNotFoundError(f"No apk artifacts found under {packages_dir}")
+
+    for repo_dir in repo_dirs:
+        apks = sorted(path.name for path in repo_dir.glob("*.apk") if path.is_file())
+        if not apks:
+            continue
+        cmd = [
+            apk_tool,
+            "mkndx",
+            "--allow-untrusted",
+            "--output",
+            "packages.adb",
+            *apks,
+        ]
+        subprocess.run(
+            cmd,
+            check=True,
+            cwd=repo_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+
 def create_apks_archive(target_dir: Path, dist_dir: Path) -> None:
     buildroot_dir = target_dir.parents[3]
     ensure_turboacc_packages_present(target_dir, buildroot_dir)
@@ -123,6 +172,7 @@ def create_apks_archive(target_dir: Path, dist_dir: Path) -> None:
         stage_dir = work_dir / "stage"
         stage_packages = stage_dir / "packages"
         collect_packages_tree(target_dir, buildroot_dir, stage_packages)
+        refresh_packages_indexes(stage_packages, buildroot_dir)
         ensure_packages_index_valid(stage_packages, buildroot_dir)
         entries = ["packages"]
         kmods_dir = target_dir / "kmods"

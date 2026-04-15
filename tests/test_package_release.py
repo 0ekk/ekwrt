@@ -191,6 +191,30 @@ class PackageReleaseTests(unittest.TestCase):
     def test_accepts_selected_turboacc_package_from_bin_packages(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
+            host_bin = workspace / "staging_dir" / "host" / "bin"
+            host_bin.mkdir(parents=True)
+            (host_bin / "apk").write_text(
+                "#!/usr/bin/env sh\n"
+                "if [ \"$1\" = \"mkndx\" ]; then\n"
+                "  out=\"\"\n"
+                "  shift\n"
+                "  while [ $# -gt 0 ]; do\n"
+                "    if [ \"$1\" = \"--output\" ]; then\n"
+                "      out=\"$2\"; shift 2; continue\n"
+                "    fi\n"
+                "    shift\n"
+                "  done\n"
+                "  printf 'index' > \"$out\"\n"
+                "  exit 0\n"
+                "fi\n"
+                "if [ \"$1\" = \"adbdump\" ]; then\n"
+                "  exit 0\n"
+                "fi\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            os.chmod(host_bin / "apk", 0o755)
+
             target_dir = workspace / "bin" / "targets" / "x86" / "64"
             package_dir = target_dir / "packages"
             package_dir.mkdir(parents=True)
@@ -210,8 +234,10 @@ class PackageReleaseTests(unittest.TestCase):
 
             feed_repo = workspace / "bin" / "packages" / "x86_64" / "turboacc"
             feed_repo.mkdir(parents=True)
-            (feed_repo / "packages.adb").write_text("index", encoding="utf-8")
             (feed_repo / "luci-app-turboacc-1-r1.apk").write_text("pkg", encoding="utf-8")
+            (feed_repo / "firewall4-1-r1.apk").write_text("pkg", encoding="utf-8")
+            (feed_repo / "libnftnl11-1-r1.apk").write_text("pkg", encoding="utf-8")
+            (feed_repo / "nftables-json-1-r1.apk").write_text("pkg", encoding="utf-8")
 
             env = os.environ.copy()
             env["TARGET_DIR"] = str(target_dir)
@@ -231,6 +257,57 @@ class PackageReleaseTests(unittest.TestCase):
                 capture_output=True,
             ).stdout
             self.assertIn("packages/feeds/x86_64/turboacc/luci-app-turboacc-1-r1.apk", listing)
+            self.assertIn("packages/feeds/x86_64/turboacc/firewall4-1-r1.apk", listing)
+            self.assertIn("packages/feeds/x86_64/turboacc/libnftnl11-1-r1.apk", listing)
+            self.assertIn("packages/feeds/x86_64/turboacc/nftables-json-1-r1.apk", listing)
+
+    def test_fails_when_required_turboacc_dependencies_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            host_bin = workspace / "staging_dir" / "host" / "bin"
+            host_bin.mkdir(parents=True)
+            (host_bin / "apk").write_text(
+                "#!/usr/bin/env sh\n"
+                "if [ \"$1\" = \"mkndx\" ] || [ \"$1\" = \"adbdump\" ]; then exit 0; fi\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            os.chmod(host_bin / "apk", 0o755)
+
+            target_dir = workspace / "bin" / "targets" / "x86" / "64"
+            package_dir = target_dir / "packages"
+            package_dir.mkdir(parents=True)
+            for name in ("config.buildinfo", "feeds.buildinfo", "version.buildinfo"):
+                (target_dir / name).write_text(name, encoding="utf-8")
+            (package_dir / "packages.adb").write_text("index", encoding="utf-8")
+
+            turboacc_dir = workspace / "package" / "turboacc"
+            turboacc_dir.mkdir(parents=True)
+            (turboacc_dir / "Makefile").write_text(
+                "define Package/luci-app-turboacc\nendef\n",
+                encoding="utf-8",
+            )
+            (workspace / ".config").write_text("CONFIG_PACKAGE_luci-app-turboacc=y\n", encoding="utf-8")
+
+            feed_repo = workspace / "bin" / "packages" / "x86_64" / "turboacc"
+            feed_repo.mkdir(parents=True)
+            (feed_repo / "luci-app-turboacc-1-r1.apk").write_text("pkg", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["TARGET_DIR"] = str(target_dir)
+            env["DIST_DIR"] = str(workspace / "dist")
+            result = subprocess.run(
+                [str(SCRIPT)],
+                check=False,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("firewall4", result.stderr)
+            self.assertIn("libnftnl", result.stderr)
+            self.assertIn("nftables-json", result.stderr)
 
 
 if __name__ == "__main__":
