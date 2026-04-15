@@ -54,12 +54,17 @@ def ensure_turboacc_packages_present(target_dir: Path, buildroot_dir: Path) -> N
     defined = extract_turboacc_package_names(buildroot_dir)
     selected = read_selected_packages(buildroot_dir)
     required = sorted(name for name in defined if name in selected)
-    missing = [name for name in required if not list(target_dir.rglob(f"{name}-*.apk"))]
+    search_roots = [target_dir, buildroot_dir / "bin" / "packages"]
+    missing = []
+    for name in required:
+        found = any(root.is_dir() and any(root.rglob(f"{name}-*.apk")) for root in search_roots)
+        if not found:
+            missing.append(name)
     if missing:
         raise FileNotFoundError(
             "Missing turboacc package artifacts: "
             + ", ".join(missing)
-            + f" under {target_dir}"
+            + f" under {target_dir} and {buildroot_dir / 'bin' / 'packages'}"
         )
 
 
@@ -71,38 +76,54 @@ def pick_apk_tool(buildroot_dir: Path) -> str | None:
 
 
 def ensure_packages_index_valid(packages_dir: Path, buildroot_dir: Path) -> None:
-    index = packages_dir / "packages.adb"
-    if not index.is_file():
-        raise FileNotFoundError(f"Missing required index: {index}")
-    if index.stat().st_size == 0:
-        raise ValueError(f"Empty packages index: {index}")
-
+    indexes = sorted(path for path in packages_dir.rglob("packages.adb") if path.is_file())
+    if not indexes:
+        raise FileNotFoundError(f"Missing required index files under {packages_dir}")
+    for index in indexes:
+        if index.stat().st_size == 0:
+            raise ValueError(f"Empty packages index: {index}")
     apk_tool = pick_apk_tool(buildroot_dir)
     if apk_tool is None:
         return
-    subprocess.run(
-        [apk_tool, "adbdump", "--format", "json", str(index)],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    for index in indexes:
+        subprocess.run(
+            [apk_tool, "adbdump", "--format", "json", str(index)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+
+def collect_packages_tree(target_dir: Path, buildroot_dir: Path, destination: Path) -> None:
+    target_packages = target_dir / "packages"
+    bin_packages = buildroot_dir / "bin" / "packages"
+    copied_any = False
+
+    if target_packages.is_dir():
+        shutil.copytree(target_packages, destination, dirs_exist_ok=True)
+        copied_any = True
+
+    if bin_packages.is_dir():
+        shutil.copytree(bin_packages, destination / "feeds", dirs_exist_ok=True)
+        copied_any = True
+
+    if not copied_any:
+        raise FileNotFoundError(
+            f"Missing package repositories: {target_packages} and {bin_packages}"
+        )
 
 
 def create_apks_archive(target_dir: Path, dist_dir: Path) -> None:
     buildroot_dir = target_dir.parents[3]
-    packages_dir = target_dir / "packages"
-    if not packages_dir.is_dir():
-        raise FileNotFoundError(f"Missing required packages directory: {packages_dir}")
-
     ensure_turboacc_packages_present(target_dir, buildroot_dir)
-    ensure_packages_index_valid(packages_dir, buildroot_dir)
 
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
-
         stage_dir = work_dir / "stage"
-        shutil.copytree(packages_dir, stage_dir / "packages")
+        stage_packages = stage_dir / "packages"
+        collect_packages_tree(target_dir, buildroot_dir, stage_packages)
+        ensure_packages_index_valid(stage_packages, buildroot_dir)
         entries = ["packages"]
         kmods_dir = target_dir / "kmods"
         if kmods_dir.is_dir():
